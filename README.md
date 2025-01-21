@@ -13,6 +13,7 @@ We start from the set of the following models
 
 ## Main contribution and changes of the model 
 
+We take DFD-GCN as our main model.
 We are adding the local information from graphs encoding their features into the vector information.
 We distinguish two main sets of features:
 - structural features of graph (degree, betweenness, clustering, community structure) 
