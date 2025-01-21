@@ -14,6 +14,8 @@ We start from the set of the following models
 ## Main contribution and changes of the model 
 
 We take DFD-GCN as our main model.
+The encoder framework used by default is unsupervised, i.e., the model is optimized. 
+One can use other variations of this model such as models like Node2vec for node properties decoding https://snap.stanford.edu/node2vec/ 
 We are adding the local information from graphs encoding their features into the vector information.
 We distinguish two main sets of features:
 - structural features of graph (degree, betweenness, clustering, community structure) 
