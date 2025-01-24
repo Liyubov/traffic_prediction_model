@@ -2,6 +2,45 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+class SelfAttention(nn.Module):
+    def __init__(self, embed_size, heads):
+        super(SelfAttention, self).__init__()
+        self.embed_size = embed_size
+        self.heads = heads
+        self.head_dim = embed_size // heads
+
+        assert (
+            self.head_dim * heads == embed_size
+        ), "Embedding size needs to be divisible by heads"
+
+        self.values = nn.Linear(self.head_dim, self.head_dim, bias=False)
+        self.keys = nn.Linear(self.head_dim, self.head_dim, bias=False)
+        self.queries = nn.Linear(self.head_dim, self.head_dim, bias=False)
+        self.fc_out = nn.Linear(heads * self.head_dim, embed_size)
+
+    def forward(self, values, keys, query):
+        N = query.shape[0]
+        value_len, key_len, query_len = values.shape[1], keys.shape[1], query.shape[1]
+
+        # Split the embedding into self.heads different pieces
+        values = values.reshape(N, value_len, self.heads, self.head_dim)
+        keys = keys.reshape(N, key_len, self.heads, self.head_dim)
+        queries = query.reshape(N, query_len, self.heads, self.head_dim)
+
+        values = self.values(values)
+        keys = self.keys(keys)
+        queries = self.queries(queries)
+
+        # Scaled dot-product attention
+        energy = torch.einsum("nqhd,nkhd->nhqk", [queries, keys])
+        attention = torch.softmax(energy / (self.embed_size ** (1 / 2)), dim=3)
+
+        out = torch.einsum("nhql,nlhd->nqhd", [attention, values]).reshape(
+            N, query_len, self.heads * self.head_dim
+        )
+
+        out = self.fc_out(out)
+        return out
 
 class convt(nn.Module):
     def __init__(self):
@@ -86,41 +125,45 @@ def cat(x1,x2):
     result = torch.stack(M,dim=0)
     return result
 
-
 class DFDGCN(nn.Module):
 
     def __init__(self, num_nodes, dropout=0.3, supports=None,
                     gcn_bool=True, addaptadj=True, aptinit=None,
                     in_dim=2, out_dim=12, residual_channels=32,
                     dilation_channels=32, skip_channels=256, end_channels=512,
-                    kernel_size=2, blocks=4, layers=2, a=1, seq_len=12, affine=True, fft_emb=10, identity_emb=10, hidden_emb=30, subgraph=20):
+                    kernel_size=2, blocks=4, layers=2, a=1, seq_len=12, affine=True, 
+                    fft_emb=10, identity_emb=10, hidden_emb=30, subgraph=20, 
+                    add_channels=0,embed_size=64, heads=4):
         super(DFDGCN, self).__init__()
-        self.dropout = dropout
+        self.a = a
+        self.heads = heads
+        self.emb = fft_emb
         self.blocks = blocks
         self.layers = layers
+        self.seq_len = seq_len
+        self.dropout = dropout
+        self.supports = supports
         self.gcn_bool = gcn_bool
         self.addaptadj = addaptadj
-        self.filter_convs = nn.ModuleList()
-        self.gate_convs = nn.ModuleList()
-        self.residual_convs = nn.ModuleList()
-        self.skip_convs = nn.ModuleList()
+        self.hidden_emb = hidden_emb
+        self.embed_size = embed_size
+        self.subgraph_size = subgraph
+        self.add_channels = add_channels
+        self.identity_emb = identity_emb
         self.bn = nn.ModuleList()
         self.gconv = nn.ModuleList()
-        self.seq_len = seq_len
-        self.a = a
-
+        self.gate_convs = nn.ModuleList()
+        self.skip_convs = nn.ModuleList()
+        self.filter_convs = nn.ModuleList()
+        self.residual_convs = nn.ModuleList()
+        self.self_attention = SelfAttention(embed_size, heads)
         self.start_conv = nn.Conv2d(in_channels=in_dim,
                                     out_channels=residual_channels,
                                     kernel_size=(1, 1))
 
-        self.supports = supports
-        self.emb = fft_emb
-        self.subgraph_size = subgraph
-        self.identity_emb = identity_emb
-        self.hidden_emb = hidden_emb
         self.fft_len = round(seq_len//2) + 1
         self.Ex1 = nn.Parameter(torch.randn(self.fft_len, self.emb), requires_grad=True)
-        self.Wd = nn.Parameter(torch.randn(num_nodes,self.emb + self.identity_emb + self.seq_len * 2, self.hidden_emb), requires_grad=True)
+        self.Wd = nn.Parameter(torch.randn(num_nodes,self.emb + self.identity_emb + self.seq_len * 2 + self.add_channels, self.hidden_emb), requires_grad=True)
         self.Wxabs = nn.Parameter(torch.randn(self.hidden_emb, self.hidden_emb), requires_grad=True)
 
         self.mlp = linear(residual_channels * 4,residual_channels)
@@ -240,6 +283,7 @@ class DFDGCN(nn.Module):
         
         data = history_data
 
+
         in_len = input.size(3)
         if in_len < self.receptive_field:
             x = nn.functional.pad(
@@ -263,6 +307,8 @@ class DFDGCN(nn.Module):
             T_D = self.T_i_D_emb[(data[:, :, :, 1] * 288).type(torch.LongTensor)][:, -1, :, :]
             D_W = self.D_i_W_emb[(data[:, :, :, 2] * 7).type(torch.LongTensor)][:, -1, :, :]
             # G_E = self.G_emb[(data[:, :, :, 3]).type(torch.LongTensor)][:, -1, :, :]
+            node2vec_emb = data[:, -1, :, 3:]
+            attended_emb = self.self_attention(node2vec_emb, node2vec_emb, node2vec_emb)
 
             xn1 = torch.fft.rfft(xn1, dim=-1)
             xn1 = torch.abs(xn1)
@@ -272,7 +318,7 @@ class DFDGCN(nn.Module):
 
             xn1 = torch.matmul(xn1, self.Ex1)
             xn1k = cat(xn1, self.node1)
-            x_n1 = torch.cat([xn1k, T_D, D_W], dim=2)
+            x_n1 = torch.cat([xn1k, T_D, D_W, attended_emb], dim=2)
             x1 = torch.bmm(x_n1.permute(1,0,2),self.Wd).permute(1,0,2)
             x1 = torch.relu(x1)
             x1k = self.layersnorm(x1)
