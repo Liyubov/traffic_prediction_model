@@ -163,5 +163,3 @@ cython_debug/
 
 /data
 /local test
-*.pth
-*.pth
