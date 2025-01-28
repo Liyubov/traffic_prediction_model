@@ -52,16 +52,18 @@ class GraphClusterProcessor:
         )
         fig.show()
 
-    def cluster_and_add_channel(self, metric='betweenness', n_clusters=5):
+    def cluster_and_add_channel(self, metric='betweenness', n_clusters=5, one_hot=False):
         """
         Кластеризация узлов и добавление индексов кластеров как нового канала.
 
         Параметры:
             metric (str): Метрика графа ('betweenness', 'degree', 'closeness', 'eigenvector').
             n_clusters (int): Количество кластеров для K-Means.
+            one_hot (bool): Если True, преобразовать индексы кластеров в формат one-hot.
 
         Возвращает:
-            numpy.ndarray: Тензор данных с добавленным каналом [time_steps, num_nodes, num_features + 1].
+            numpy.ndarray: Тензор данных с добавленным каналом [time_steps, num_nodes, num_features + 1] или 
+                           [time_steps, num_nodes, num_features + n_clusters] в случае one-hot.
         """
         values = self._get_graph_metric(metric)
 
@@ -69,12 +71,20 @@ class GraphClusterProcessor:
         kmeans = KMeans(n_clusters=n_clusters, random_state=42)
         labels = kmeans.fit_predict(np.array(values).reshape(-1, 1))
 
-        # Добавление меток кластеров как нового канала
-        labels_expanded = np.expand_dims(labels, axis=0)  # [1, num_nodes]
-        labels_expanded = np.expand_dims(labels_expanded, axis=-1)  # [1, num_nodes, 1]
-        labels_expanded = np.repeat(labels_expanded, self.data.shape[0], axis=0)  # [time_steps, num_nodes, 1]
+        if one_hot:
+            # Преобразование в формат one-hot
+            labels_one_hot = np.eye(n_clusters)[labels]  # [num_nodes, n_clusters]
+            labels_expanded = np.expand_dims(labels_one_hot, axis=0)  # [1, num_nodes, n_clusters]
+        else:
+            # Преобразование в обычный канал
+            labels_expanded = np.expand_dims(labels, axis=0)  # [1, num_nodes]
+            labels_expanded = np.expand_dims(labels_expanded, axis=-1)  # [1, num_nodes, 1]
 
-        data_with_clusters = np.concatenate([self.data, labels_expanded], axis=-1)  # [time_steps, num_nodes, num_features + 1]
+        # Дублирование меток по временным шагам
+        labels_expanded = np.repeat(labels_expanded, self.data.shape[0], axis=0)  # [time_steps, num_nodes, *]
+
+        # Добавление меток кластеров к данным
+        data_with_clusters = np.concatenate([self.data, labels_expanded], axis=-1)  # [time_steps, num_nodes, num_features + *]
         return data_with_clusters
 
     def plot_group_average_speeds(self, labels, n_clusters):
