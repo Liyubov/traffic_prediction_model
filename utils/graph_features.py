@@ -143,5 +143,7 @@ class GraphClusterProcessor:
             return list(nx.closeness_centrality(self.graph).values())
         elif metric == 'eigenvector':
             return list(nx.eigenvector_centrality(self.graph, max_iter=1000).values())
+        elif metric == 'PageRank':
+            return list(nx.pagerank(self.graph).values())
         else:
-            raise ValueError(f"Метрика '{metric}' не поддерживается. Выберите из: 'betweenness', 'degree', 'closeness', 'eigenvector'.")
+            raise ValueError(f"Метрика '{metric}' не поддерживается. Выберите из: 'betweenness', 'degree', 'closeness', 'eigenvector', 'PageRank'.")
