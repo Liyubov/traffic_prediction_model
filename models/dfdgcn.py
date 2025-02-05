@@ -1,46 +1,8 @@
 import torch
-import torch.nn as nn
+from torch import nn
 import torch.nn.functional as F
+import numpy as np
 
-class SelfAttention(nn.Module):
-    def __init__(self, embed_size, heads):
-        super(SelfAttention, self).__init__()
-        self.embed_size = embed_size
-        self.heads = heads
-        self.head_dim = embed_size // heads
-
-        assert (
-            self.head_dim * heads == embed_size
-        ), "Embedding size needs to be divisible by heads"
-
-        self.values = nn.Linear(self.head_dim, self.head_dim, bias=False)
-        self.keys = nn.Linear(self.head_dim, self.head_dim, bias=False)
-        self.queries = nn.Linear(self.head_dim, self.head_dim, bias=False)
-        self.fc_out = nn.Linear(heads * self.head_dim, embed_size)
-
-    def forward(self, values, keys, query):
-        N = query.shape[0]
-        value_len, key_len, query_len = values.shape[1], keys.shape[1], query.shape[1]
-
-        # Split the embedding into self.heads different pieces
-        values = values.reshape(N, value_len, self.heads, self.head_dim)
-        keys = keys.reshape(N, key_len, self.heads, self.head_dim)
-        queries = query.reshape(N, query_len, self.heads, self.head_dim)
-
-        values = self.values(values)
-        keys = self.keys(keys)
-        queries = self.queries(queries)
-
-        # Scaled dot-product attention
-        energy = torch.einsum("nqhd,nkhd->nhqk", [queries, keys])
-        attention = torch.softmax(energy / (self.embed_size ** (1 / 2)), dim=3)
-
-        out = torch.einsum("nhql,nlhd->nqhd", [attention, values]).reshape(
-            N, query_len, self.heads * self.head_dim
-        )
-
-        out = self.fc_out(out)
-        return out
 
 class convt(nn.Module):
     def __init__(self):
@@ -49,7 +11,6 @@ class convt(nn.Module):
     def forward(self, x, w):
         x = torch.einsum('bne, ek->bnk', (x, w))
         return x.contiguous()
-    
 class nconv(nn.Module):
     def __init__(self):
         super(nconv, self).__init__()
@@ -73,6 +34,7 @@ class linear(nn.Module):
 
     def forward(self, x):
         return self.mlp(x)
+
 
 class gcn(nn.Module):
     """Graph convolution network."""
@@ -103,6 +65,8 @@ class gcn(nn.Module):
         h = F.dropout(h, self.dropout, training=self.training)
         return h
 
+
+
 def dy_mask_graph(adj, k):
     M = []
     for i in range(adj.size(0)):
@@ -116,6 +80,8 @@ def dy_mask_graph(adj, k):
     adj = adj * mask
     return adj
 
+
+
 def cat(x1,x2):
     M = []
     for i in range(x1.size(0)):
@@ -125,45 +91,41 @@ def cat(x1,x2):
     result = torch.stack(M,dim=0)
     return result
 
+
 class DFDGCN(nn.Module):
 
     def __init__(self, num_nodes, dropout=0.3, supports=None,
                     gcn_bool=True, addaptadj=True, aptinit=None,
                     in_dim=2, out_dim=12, residual_channels=32,
                     dilation_channels=32, skip_channels=256, end_channels=512,
-                    kernel_size=2, blocks=4, layers=2, a=1, seq_len=12, affine=True, 
-                    fft_emb=10, identity_emb=10, hidden_emb=30, subgraph=20, 
-                    add_channels=0,embed_size=64, heads=4):
+                    kernel_size=2, blocks=4, layers=2, a=1, seq_len=12, affine=True, fft_emb=10, identity_emb=10, hidden_emb=30, subgraph=20):
         super(DFDGCN, self).__init__()
-        self.a = a
-        self.heads = heads
-        self.emb = fft_emb
+        self.dropout = dropout
         self.blocks = blocks
         self.layers = layers
-        self.seq_len = seq_len
-        self.dropout = dropout
-        self.supports = supports
         self.gcn_bool = gcn_bool
         self.addaptadj = addaptadj
-        self.hidden_emb = hidden_emb
-        self.embed_size = embed_size
-        self.subgraph_size = subgraph
-        self.add_channels = add_channels
-        self.identity_emb = identity_emb
+        self.filter_convs = nn.ModuleList()
+        self.gate_convs = nn.ModuleList()
+        self.residual_convs = nn.ModuleList()
+        self.skip_convs = nn.ModuleList()
         self.bn = nn.ModuleList()
         self.gconv = nn.ModuleList()
-        self.gate_convs = nn.ModuleList()
-        self.skip_convs = nn.ModuleList()
-        self.filter_convs = nn.ModuleList()
-        self.residual_convs = nn.ModuleList()
-        self.self_attention = SelfAttention(embed_size, heads)
+        self.seq_len = seq_len
+        self.a = a
+
         self.start_conv = nn.Conv2d(in_channels=in_dim,
                                     out_channels=residual_channels,
                                     kernel_size=(1, 1))
 
+        self.supports = supports
+        self.emb = fft_emb
+        self.subgraph_size = subgraph
+        self.identity_emb = identity_emb
+        self.hidden_emb = hidden_emb
         self.fft_len = round(seq_len//2) + 1
         self.Ex1 = nn.Parameter(torch.randn(self.fft_len, self.emb), requires_grad=True)
-        self.Wd = nn.Parameter(torch.randn(num_nodes,self.emb + self.identity_emb + self.seq_len * 2 + self.add_channels, self.hidden_emb), requires_grad=True)
+        self.Wd = nn.Parameter(torch.randn(num_nodes,self.emb + self.identity_emb + self.seq_len * 2, self.hidden_emb), requires_grad=True)
         self.Wxabs = nn.Parameter(torch.randn(self.hidden_emb, self.hidden_emb), requires_grad=True)
 
         self.mlp = linear(residual_channels * 4,residual_channels)
@@ -178,8 +140,6 @@ class DFDGCN(nn.Module):
             torch.empty(288, self.seq_len))
         self.D_i_W_emb = nn.Parameter(
             torch.empty(7, self.seq_len))
-        self.G_emb = nn.Parameter(
-            torch.empty(num_nodes, self.seq_len))
 
         receptive_field = 1
         self.reset_parameter()
@@ -251,10 +211,9 @@ class DFDGCN(nn.Module):
     def reset_parameter(self):
         nn.init.xavier_uniform_(self.T_i_D_emb)
         nn.init.xavier_uniform_(self.D_i_W_emb)
-        nn.init.xavier_uniform_(self.G_emb)
 
 
-    def forward(self, history_data: torch.Tensor) -> torch.Tensor:
+    def forward(self, history_data: torch.Tensor, future_data: torch.Tensor, batch_seen: int, epoch: int, train: bool, **kwargs) -> torch.Tensor:
         """Feedforward function of DFDGCN; Based on Graph WaveNet
 
         Args:
@@ -279,10 +238,8 @@ class DFDGCN(nn.Module):
             torch.Tensor: [B, L, N, 1]
         """
         #num_feat = model_args["num_feat"]
-        input = history_data.transpose(1, 3).contiguous()[:,:,:,:]
-        
+        input = history_data.transpose(1, 3).contiguous()[:,0:2,:,:]
         data = history_data
-
 
         in_len = input.size(3)
         if in_len < self.receptive_field:
@@ -305,14 +262,14 @@ class DFDGCN(nn.Module):
             xn1 = input[:, 0, :, -self.seq_len:]
 
             T_D = self.T_i_D_emb[(data[:, :, :, 1] * 288).type(torch.LongTensor)][:, -1, :, :]
-            D_W = self.D_i_W_emb[(data[:, :, :, 2] * 7).type(torch.LongTensor)][:, -1, :, :]
-            node2vec_emb = data[:, -1, :, 3:]
+            D_W = self.D_i_W_emb[(data[:, :, :, 1 + 1]).type(torch.LongTensor)][:, -1, :, :]
 
             xn1 = torch.fft.rfft(xn1, dim=-1)
             xn1 = torch.abs(xn1)
 
             xn1 = torch.nn.functional.normalize(xn1, p=2.0, dim=1, eps=1e-12, out=None)
             xn1 = torch.nn.functional.normalize(xn1, p=2.0, dim=2, eps=1e-12, out=None) * self.a
+
 
             xn1 = torch.matmul(xn1, self.Ex1)
             xn1k = cat(xn1, self.node1)
@@ -328,8 +285,20 @@ class DFDGCN(nn.Module):
             adp = F.softmax(adp, dim=2)
             new_supports = new_supports + [adp]
 
+
+
         # WaveNet layers
         for i in range(self.blocks * self.layers):
+
+            #            |----------------------------------------|     *residual*
+            #            |                                        |
+            #            |    |-- conv -- tanh --|                |
+            # -> dilate -|----|                  * ----|-- 1x1 -- + -->	*input*
+            #                 |-- conv -- sigm --|     |
+            #                                         1x1
+            #                                          |
+            # ---------------------------------------> + ------------->	*skip*
+
 
             # dilated convolution
             residual = x
@@ -340,10 +309,13 @@ class DFDGCN(nn.Module):
             x = filter * gate
 
             # parametrized skip connection
+
             s = x
+
             s = self.skip_convs[i](s)
             try:
                 skip = skip[:, :, :,  -s.size(3):]
+
             except:
                 skip = 0
             skip = s + skip
