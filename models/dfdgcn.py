@@ -273,7 +273,7 @@ class DFDGCN(nn.Module):
 
             xn1 = torch.matmul(xn1, self.Ex1)
             xn1k = cat(xn1, self.node1)
-            x_n1 = torch.cat([xn1k, T_D, D_W, attended_emb], dim=2)
+            x_n1 = torch.cat([xn1k, T_D, D_W], dim=2)
             x1 = torch.bmm(x_n1.permute(1,0,2),self.Wd).permute(1,0,2)
             x1 = torch.relu(x1)
             x1k = self.layersnorm(x1)
