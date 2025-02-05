@@ -306,7 +306,9 @@ class DFDGCN(nn.Module):
 
             T_D = self.T_i_D_emb[(data[:, :, :, 1] * 288).type(torch.LongTensor)][:, -1, :, :]
             D_W = self.D_i_W_emb[(data[:, :, :, 2] * 7).type(torch.LongTensor)][:, -1, :, :]
+            # G_E = self.G_emb[(data[:, :, :, 3]).type(torch.LongTensor)][:, -1, :, :]
             node2vec_emb = data[:, -1, :, 3:]
+            attended_emb = self.self_attention(node2vec_emb, node2vec_emb, node2vec_emb)
 
             xn1 = torch.fft.rfft(xn1, dim=-1)
             xn1 = torch.abs(xn1)
@@ -316,7 +318,7 @@ class DFDGCN(nn.Module):
 
             xn1 = torch.matmul(xn1, self.Ex1)
             xn1k = cat(xn1, self.node1)
-            x_n1 = torch.cat([xn1k, T_D, D_W], dim=2)
+            x_n1 = torch.cat([xn1k, T_D, D_W, attended_emb], dim=2)
             x1 = torch.bmm(x_n1.permute(1,0,2),self.Wd).permute(1,0,2)
             x1 = torch.relu(x1)
             x1k = self.layersnorm(x1)
