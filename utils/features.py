@@ -26,6 +26,32 @@ def max_feature(data):
     """Максимум."""
     return np.max(data, axis=0)
 
+def first_derivative_feature(data):
+    """Первая производная (скорость изменения)."""
+    return np.diff(data, axis=0)
+
+def second_derivative_feature(data):
+    """Вторая производная."""
+    first_deriv = first_derivative_feature(data)
+    second_deriv = np.diff(first_deriv, axis=0)
+    
+    # Добавляем нули в начало, чтобы сохранить размерность
+    second_deriv = np.vstack([np.zeros((2, data.shape[1])), second_deriv])
+    return second_deriv
+
+def lagged_feature(data, lags=[1,2,3]):
+    """Добавляет лаггированные признаки для данных."""
+    data_lagged = []
+    for lag in lags:
+        lagged_data = np.roll(data, shift=lag, axis=0)  # Сдвигаем данные на заданное количество шагов
+        lagged_data[:lag] = 0  # Заполняем пропуски нулями
+        data_lagged.append(lagged_data)
+    
+    # Объединяем оригинальные данные с лагами
+    data_lagged = np.concatenate(data_lagged, axis=-1)
+    
+    return data_lagged
+
 def kurtosis_feature(data):
     """Эксцесс."""
     return kurtosis(data, axis=0)
