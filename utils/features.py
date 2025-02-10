@@ -26,18 +26,9 @@ def max_feature(data):
     """Максимум."""
     return np.max(data, axis=0)
 
-def first_derivative_feature(data):
-    """Первая производная (скорость изменения)."""
+def derivative_feature(data):
+    """Производная."""
     return np.diff(data, axis=0)
-
-def second_derivative_feature(data):
-    """Вторая производная."""
-    first_deriv = first_derivative_feature(data)
-    second_deriv = np.diff(first_deriv, axis=0)
-    
-    # Добавляем нули в начало, чтобы сохранить размерность
-    second_deriv = np.vstack([np.zeros((2, data.shape[1])), second_deriv])
-    return second_deriv
 
 def lagged_feature(data, lags=[1,2,3]):
     """Добавляет лаггированные признаки для данных."""
